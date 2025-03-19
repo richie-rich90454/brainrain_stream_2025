@@ -1,112 +1,167 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC Video Streaming</title>
-  <style>
-    video { width: 45%; height: auto; margin: 5px; }
-  </style>
-</head>
-<body>
-  <h1>WebRTC Video Streaming</h1>
-  <div>
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
-  </div>
-
-  <script>
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-    const socket = new WebSocket('ws://' + window.location.host);
-    let localStream;
-    let peerConnection;
-    const configuration = {
-      iceServers: [{ urls: 'stun:stun.bj.baidubce.com:3478' }]
-    };
-
-    // Get the local media (camera + mic)
-    async function getLocalStream() {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = localStream;
-      } catch (err) {
-        console.error('Error accessing media devices.', err);
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Brain Rain Science Stream</title>
+    <style>
+      .video-container{
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 10px;
+        padding: 10px;
       }
-    }
-
-    // Set up WebSocket handlers
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.offer) {
-        handleOffer(message.offer);
-      } else if (message.answer) {
-        handleAnswer(message.answer);
-      } else if (message.iceCandidate) {
-        handleIceCandidate(message.iceCandidate);
+      video{
+        width: 100%;
+        height: 225px;
+        border: 1px solid #ccc;
       }
-    };
-
-    socket.onopen = () => {
-      getLocalStream();
-    };
-
-    // Send message via WebSocket
-    function sendMessage(message) {
-      socket.send(JSON.stringify(message));
-    }
-
-    // Create peer connection
-    function createPeerConnection() {
-      peerConnection = new RTCPeerConnection(configuration);
-
-      // Add local stream to the peer connection
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-      // When remote stream is added, show it in the video element
-      peerConnection.ontrack = (event) => {
-        remoteVideo.srcObject = event.streams[0];
+      button{
+        padding: 10px 20px;
+        margin: 10px;
+        font-size: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Group Video Conference</h1>
+    <button id="joinButton">Join Session</button>
+    <div class="video-container">
+      <video id="localVideo" autoplay muted></video>
+    </div>
+    <script>
+      const localVideo=document.getElementById('localVideo');
+      const joinButton=document.getElementById('joinButton');
+      const videoContainer=document.querySelector('.video-container');
+      let localStream;
+      let socket;
+      let peerConnection;
+      const configuration={
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
       };
-
-      // ICE candidate event handler
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          sendMessage({ iceCandidate: event.candidate });
+      async function initialize(){
+        try{
+          localStream=await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+          });
+          localVideo.srcObject=localStream;
+          setupWebSocket();
+        } catch (error){
+          console.error('Error accessing media devices:', error);
         }
-      };
-    }
-
-    // Handle offer
-    async function handleOffer(offer) {
-      createPeerConnection();
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      sendMessage({ answer: answer });
-    }
-
-    // Handle answer
-    async function handleAnswer(answer) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-
-    // Handle ICE candidate
-    function handleIceCandidate(candidate) {
-      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    }
-
-    // Start the process by creating an offer
-    async function startCall() {
-      createPeerConnection();
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      sendMessage({ offer: offer });
-    }
-
-    // Start the call when the page loads
-    window.onload = () => {
-      startCall();
-    };
-  </script>
-</body>
+      }
+      function setupWebSocket(){
+        socket=new WebSocket('ws://' + window.location.host);
+        socket.onmessage=async (event)=>{
+          const message=JSON.parse(event.data);
+          switch (message.type){
+            case 'offer':
+              handleOffer(message);
+              break;
+            case 'answer':
+              handleAnswer(message);
+              break;
+            case 'ice-candidate':
+              handleIceCandidate(message.candidate);
+              break;
+            case 'newParticipant':
+              handleNewParticipant(message.participantId);
+              break;
+            case 'endParticipant':
+              handleEndParticipant(message.participantId);
+              break;
+          }
+        };
+      }
+      async function createPeerConnection(participantId){
+        const pc=new RTCPeerConnection(configuration);
+        localStream.getTracks().forEach(track=>{
+          pc.addTrack(track, localStream);
+        });
+        pc.ontrack=(event)=>{
+          const remoteVideo=document.createElement('video');
+          remoteVideo.id=`remoteVideo_${participantId}`;
+          remoteVideo.autoplay=true;
+          remoteVideo.srcObject=event.streams[0];
+          videoContainer.appendChild(remoteVideo);
+        };
+        pc.onicecandidate=(event)=>{
+          if (event.candidate){
+            socket.send(JSON.stringify({
+              type: 'ice-candidate',
+              candidate: event.candidate,
+              target: participantId
+            }));
+          }
+        };
+        return pc;
+      }
+      async function handleOffer(message){
+        const pc=await createPeerConnection(message.from);
+        await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+        const answer=await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.send(JSON.stringify({
+          type: 'answer',
+          sdp: pc.localDescription,
+          target: message.from
+        }));
+      }
+      async function handleAnswer(message){
+        const pc=peerConnection;
+        if (pc){
+          await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+        }
+      }
+      function handleIceCandidate(candidate){
+        if (peerConnection && candidate){
+          peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      }
+      function handleNewParticipant(participantId){
+        if (participantId !== 'host') return;
+        const pc=new RTCPeerConnection(configuration);
+        peerConnection=pc;
+        localStream.getTracks().forEach(track=>{
+          pc.addTrack(track, localStream);
+        });
+        pc.ontrack=(event)=>{
+          const remoteVideo=document.createElement('video');
+          remoteVideo.id='hostVideo';
+          remoteVideo.autoplay=true;
+          remoteVideo.srcObject=event.streams[0];
+          videoContainer.appendChild(remoteVideo);
+        };
+        pc.onicecandidate=(event)=>{
+          if (event.candidate){
+            socket.send(JSON.stringify({
+              type: 'ice-candidate',
+              candidate: event.candidate,
+              target: 'host'
+            }));
+          }
+        };
+        pc.createOffer()
+          .then(offer=> pc.setLocalDescription(offer))
+          .then(()=>{
+            socket.send(JSON.stringify({
+              type: 'offer',
+              sdp: pc.localDescription,
+              target: 'host'
+            }));
+          });
+      }
+      function handleEndParticipant(participantId){
+        const videoElement=document.getElementById(`remoteVideo_${participantId}`);
+        if (videoElement){
+          videoElement.remove();
+        }
+      }
+      joinButton.addEventListener('click', ()=>{
+        joinButton.disabled=true;
+        initialize();
+        socket.send(JSON.stringify({ type: 'join' }));
+      });
+    </script>
+  </body>
 </html>
