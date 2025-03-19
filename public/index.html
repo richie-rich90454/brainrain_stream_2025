@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC Video Streaming</title>
+  <title>Brain Rain Stream</title>
   <style>
     video { width: 45%; height: auto; margin: 5px; }
   </style>
@@ -19,7 +19,6 @@
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const socket = new WebSocket('ws://' + window.location.host);
-    
     let localStream;
     let peerConnection;
     const configuration = {
